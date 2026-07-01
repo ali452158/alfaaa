@@ -148,41 +148,41 @@ export function SignalCard({ card, index }: Props) {
           )}
         </div>
 
-        {/* Q3: الجودة */}
-        <div className="bg-[#1a2030] p-2.5 text-center">
-          <div className="mb-0.5 text-[9px] text-zinc-400">الجودة</div>
+        {/* Q3: الجودة (مصغّرة) */}
+        <div className="bg-[#1a2030] p-1.5 text-center">
+          <div className="text-[8px] text-zinc-400">الجودة</div>
           <div className={cn(
-            "flex flex-col items-center gap-0.5 rounded-lg py-0.5",
+            "flex items-center justify-center gap-0.5 rounded px-1 py-0.5",
             q.bg
           )}>
-            <QIcon className={cn("h-5 w-5", q.text)} />
-            <span className={cn("text-xs font-black", q.text)}>
+            <QIcon className={cn("h-3 w-3", q.text)} />
+            <span className={cn("text-[9px] font-bold", q.text)}>
               {q.label}
             </span>
           </div>
-          <div className="mt-0.5 text-[8px] text-zinc-500">
+          <div className="mt-0.5 text-[7px] text-zinc-500">
             {card.confidence}%
           </div>
         </div>
 
-        {/* Q4: السعر + دخول/هدف/خروج */}
+        {/* Q4: السعر + دخول/هدف/خروج (مكبّر) */}
         <div className="bg-[#1a2030] p-2.5 text-center">
-          <div className="mb-0.5 text-[9px] text-zinc-400">السعر</div>
-          <div className="font-mono text-xs font-bold text-white tnum">
+          <div className="mb-1 text-[10px] font-bold text-zinc-300">السعر</div>
+          <div className="font-mono text-lg font-extrabold text-white tnum">
             {card.bid !== null ? fmt(card.bid) : "—"}
           </div>
-          <div className="mt-1 grid grid-cols-3 gap-0.5 text-[7px]">
-            <div>
-              <div className="text-amber-400">دخول</div>
-              <div className="font-mono text-zinc-300 tnum">{fmt(card.entry)}</div>
+          <div className="mt-2 grid grid-cols-3 gap-1 text-[9px]">
+            <div className="rounded bg-amber-500/10 py-1">
+              <div className="font-bold text-amber-400">دخول</div>
+              <div className="font-mono text-xs font-bold text-amber-300 tnum">{fmt(card.entry)}</div>
             </div>
-            <div>
-              <div className="text-emerald-400">هدف</div>
-              <div className="font-mono text-zinc-300 tnum">{fmt(card.takeProfit)}</div>
+            <div className="rounded bg-emerald-500/10 py-1">
+              <div className="font-bold text-emerald-400">هدف</div>
+              <div className="font-mono text-xs font-bold text-emerald-300 tnum">{fmt(card.takeProfit)}</div>
             </div>
-            <div>
-              <div className="text-rose-400">خروج</div>
-              <div className="font-mono text-zinc-300 tnum">{fmt(card.stopLoss)}</div>
+            <div className="rounded bg-rose-500/10 py-1">
+              <div className="font-bold text-rose-400">خروج</div>
+              <div className="font-mono text-xs font-bold text-rose-300 tnum">{fmt(card.stopLoss)}</div>
             </div>
           </div>
         </div>

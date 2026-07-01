@@ -50,7 +50,7 @@ const state: ConnectionState = {
 // ===== Caches (prevent memory growth) =====
 const tickCache = new Map<string, { bid: number; ask: number; time: number }>();
 let lastTickRefresh = 0;
-const TICK_REFRESH_MS = 30000; // 30s
+const TICK_REFRESH_MS = 60000; // 60s — less frequent = less memory
 
 // ===== SDK instances (singleton — loaded once) =====
 let metaApiInstance: any = null;
@@ -160,6 +160,20 @@ async function doAutoConnect(): Promise<void> {
     state.error = null;
     console.log(`[MT5] ✅ Connected! Login: ${login} | Server: ${server}`);
 
+    // Subscribe to all symbols ONCE (avoids repeated subscribe calls)
+    for (const sym of TARGET_SYMBOLS) {
+      try {
+        await Promise.race([
+          rpcConnection.subscribeToMarketData(sym),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("subscribe timeout")), 3000)),
+        ]).catch(() => {});
+      } catch {}
+    }
+    console.log(`[MT5] 📡 Subscribed to ${TARGET_SYMBOLS.length} symbols`);
+
+    // Wait for terminal state to populate
+    await new Promise((r) => setTimeout(r, 2000));
+
     // Initial tick fetch
     refreshAllTicks().catch(() => {});
   } catch (e: any) {
@@ -169,7 +183,7 @@ async function doAutoConnect(): Promise<void> {
   }
 }
 
-// ===== Refresh all ticks (cached for 30s) =====
+// ===== Refresh all ticks (cached for 60s) =====
 async function refreshAllTicks() {
   if (!connectionInstance || state.status !== "connected") return;
   if (Date.now() - lastTickRefresh < TICK_REFRESH_MS) return;
@@ -177,12 +191,30 @@ async function refreshAllTicks() {
   let successCount = 0;
   for (const sym of TARGET_SYMBOLS) {
     try {
-      const tick = await Promise.race([
-        connectionInstance.getTick(sym, false),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
+      // Try terminal state first (fast, no API call)
+      const terminalState = connectionInstance.terminalState;
+      if (terminalState) {
+        const tick = terminalState.tick(sym);
+        if (tick && tick.bid > 0) {
+          tickCache.set(sym, {
+            bid: Number(tick.bid),
+            ask: Number(tick.ask),
+            time: Date.now(),
+          });
+          successCount++;
+          continue;
+        }
+      }
+
+      // Fallback: getTick with short timeout (keepSubscription=true to avoid re-subscribe)
+      const tickData = await Promise.race([
+        connectionInstance.getTick(sym, true),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("timeout")), 5000)
+        ),
       ]);
-      const bid = Number(tick.bid);
-      const ask = Number(tick.ask);
+      const bid = Number(tickData.bid);
+      const ask = Number(tickData.ask);
       if (isFinite(bid) && isFinite(ask) && bid > 0) {
         tickCache.set(sym, { bid, ask, time: Date.now() });
         successCount++;
