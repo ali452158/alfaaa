@@ -24,8 +24,6 @@ import {
   clearActivation,
   timeLeftMs,
   formatRemaining,
-  isCodeUsedOnOtherDevice,
-  markCodeAsUsed,
 } from "@/lib/subscription";
 
 interface Props {
@@ -103,40 +101,45 @@ export function ActivationGate({ children }: Props) {
     setMsg(null);
     setTimeout(() => {
       const result = validateCode(code);
-      if (result) {
-        const codeKey = `${result.plan}-${result.uniqueId}`;
-        if (isCodeUsedOnOtherDevice(codeKey)) {
-          setMsg({
-            ok: false,
-            text: "⚠️ هذا الكود مُستخدم بالفعل على جهاز آخر. كل كود يعمل على جهاز واحد فقط.",
-          });
-          setBusy(false);
-          return;
-        }
-        const rec = activate(result.plan, result.days, result.uniqueId);
-        markCodeAsUsed(codeKey);
-        const def = PLANS.find((p) => p.type === result.plan);
-        setPlanLabel(def?.labelAr ?? result.plan);
-        setRemaining(timeLeftMs());
-        setGateState("active");
-        const expiryDate = new Date(rec.expiresAt);
-        const expiryStr = expiryDate.toLocaleDateString("ar-EG", {
-          day: "numeric",
-          month: "long",
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        setMsg({
-          ok: true,
-          text: `تم تفعيل اشتراك ${def?.labelAr ?? result.plan} — ينتهي في ${expiryStr}`,
-        });
-        setCode("");
-      } else {
+      if (!result) {
         setMsg({
           ok: false,
-          text: "كود اشتراك غير صحيح أو مزوّر. تأكد من الكود وحاول مرة أخرى.",
+          text: "❌ كود اشتراك غير صحيح أو مزوّر. تأكد من الكود وحاول مرة أخرى.",
         });
+        setBusy(false);
+        return;
       }
+
+      // ✅ Try to activate the code
+      const rec = activate(result.bot, result.plan, result.days, result.uniqueId);
+      
+      if (!rec) {
+        // Activation failed — code already used on this device or another device
+        setMsg({
+          ok: false,
+          text: "⚠️ هذا الكود مُستخدم بالفعل على جهاز آخر أو تم استخدامه من قبل. كل كود يعمل على جهاز واحد فقط ولا يمكن إعادة استخدامه.",
+        });
+        setBusy(false);
+        return;
+      }
+
+      // ✅ Success
+      const def = PLANS.find((p) => p.type === result.plan);
+      setPlanLabel(def?.labelAr ?? result.plan);
+      setRemaining(timeLeftMs());
+      setGateState("active");
+      const expiryDate = new Date(rec.expiresAt);
+      const expiryStr = expiryDate.toLocaleDateString("ar-EG", {
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      setMsg({
+        ok: true,
+        text: `✅ تم تفعيل اشتراك ${def?.labelAr ?? result.plan} — ينتهي في ${expiryStr}`,
+      });
+      setCode("");
       setBusy(false);
     }, 600);
   };
@@ -324,7 +327,11 @@ export function ActivationGate({ children }: Props) {
             </div>
             <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-500">
               <Smartphone className="h-3 w-3" />
-              <span>الكود مرتبط بهذا الجهاز فقط</span>
+              <span>الكود مرتبط بهذا الجهاز فقط — لا يمكن نقله</span>
+            </div>
+            <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-500">
+              <Lock className="h-3 w-3" />
+              <span>كل كود يُستخدم مرة واحدة فقط</span>
             </div>
           </div>
         </div>
@@ -332,3 +339,4 @@ export function ActivationGate({ children }: Props) {
     </main>
   );
 }
+
