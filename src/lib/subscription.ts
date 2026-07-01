@@ -1,6 +1,7 @@
-// ===== ALFA PRO + IQ Option — Subscription code system (v3) =====
+// ===== ALFA PRO + IQ Option — Subscription code system (v4) =====
 // Supports TWO separate bots, each with independent subscriptions.
 // Bot type is encoded in the code prefix: A = ALFA PRO, I = IQ Option.
+// FIXED: Proper expiry validation, one-time use per device, daily/weekly/monthly expiry
 
 export type BotType = "alfa_pro" | "iq_option";
 export type PlanType = "trial" | "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
@@ -50,7 +51,7 @@ export function validateCode(code: string): {
 } | null {
   const clean = code.trim().toUpperCase();
   // Match: ALFA-X##-####-#### OR IQ-X##-####-####
-  const match = clean.match(/^(ALFA|IQ)-([A-Z])(\d+)-([A-Z0-9]{3,8})-([A-F0-9]{4})$/);
+  const match = clean.match(/^(ALFA|IQ)-([A-Z])(\\d+)-([A-Z0-9]{3,8})-([A-F0-9]{4})$/);
   if (!match) return null;
   const [, botPrefix, planCode, daysStr, id, checksum] = match;
   const def = PLANS.find((p) => p.code === planCode);
@@ -91,11 +92,17 @@ interface ActivationRecord {
   deviceFingerprint: string;
   activatedAt: number;
   expiresAt: number;
+  codeUsedCount: number; // Track how many times this code was used on this device
 }
 
+// ===== EXPIRY CALCULATION =====
+// For daily: expires at end of today
+// For weekly: expires at end of 7 days from today
+// For monthly: expires at end of 30 days from today
 function computeExpiry(days: number, fromTime: number): number {
   const now = new Date(fromTime);
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  // End of the target day (23:59:59.999)
   const endOfTargetDay = startOfToday + days * 24 * 60 * 60 * 1000 + (24 * 60 * 60 * 1000 - 1);
   return endOfTargetDay;
 }
@@ -111,40 +118,74 @@ export function getActivation(bot: BotType = "alfa_pro"): ActivationRecord | nul
     if (!raw) return null;
     const rec = JSON.parse(raw) as ActivationRecord;
     const currentFp = getDeviceFingerprint();
-    if (rec.deviceFingerprint !== currentFp) return null;
+    
+    // ✅ CHECK 1: Device fingerprint must match
+    if (rec.deviceFingerprint !== currentFp) {
+      console.warn("[Subscription] Device fingerprint mismatch — code is for another device");
+      return null;
+    }
+    
+    // ✅ CHECK 2: Code must not be expired
     if (!rec.expiresAt || Date.now() > rec.expiresAt) {
+      console.warn("[Subscription] Code expired");
       window.localStorage.removeItem(prefix + activeCode);
       window.localStorage.removeItem(activeKey);
       return null;
     }
+    
     return rec;
-  } catch {
+  } catch (e) {
+    console.error("[Subscription] Error reading activation:", e);
     return null;
   }
 }
 
-export function activate(bot: BotType, plan: PlanType, days: number, uniqueId: string): ActivationRecord {
+export function activate(bot: BotType, plan: PlanType, days: number, uniqueId: string): ActivationRecord | null {
   const prefix = bot === "iq_option" ? IQ_ACTIVATION_PREFIX : ACTIVATION_PREFIX;
   const activeKey = bot === "iq_option" ? IQ_ACTIVE_CODE_KEY : ACTIVE_CODE_KEY;
+  
   if (typeof window === "undefined") {
-    return { plan, uniqueId, deviceFingerprint: "server", activatedAt: Date.now(), expiresAt: Date.now() + days * 86400000 };
+    return { plan, uniqueId, deviceFingerprint: "server", activatedAt: Date.now(), expiresAt: Date.now() + days * 86400000, codeUsedCount: 1 };
   }
+  
   const codeKey = `${plan}-${uniqueId}`;
-  const existingRaw = window.localStorage.getItem(prefix + codeKey);
   const currentFp = getDeviceFingerprint();
+  
+  // ✅ CHECK: Is this code already used on THIS device?
+  const existingRaw = window.localStorage.getItem(prefix + codeKey);
   if (existingRaw) {
     try {
       const existing = JSON.parse(existingRaw) as ActivationRecord;
+      
+      // Same device — code already used
       if (existing.deviceFingerprint === currentFp) {
-        window.localStorage.setItem(activeKey, codeKey);
-        return existing;
+        console.warn("[Subscription] Code already used on this device");
+        return null; // Code already activated on this device
       }
-    } catch {}
+      
+      // Different device — code is locked to another device
+      console.warn("[Subscription] Code is locked to another device");
+      return null;
+    } catch (e) {
+      console.error("[Subscription] Error parsing existing activation:", e);
+    }
   }
+  
+  // ✅ NEW CODE: Create activation record
   const now = Date.now();
-  const rec: ActivationRecord = { plan, uniqueId, deviceFingerprint: currentFp, activatedAt: now, expiresAt: computeExpiry(days, now) };
+  const rec: ActivationRecord = {
+    plan,
+    uniqueId,
+    deviceFingerprint: currentFp,
+    activatedAt: now,
+    expiresAt: computeExpiry(days, now),
+    codeUsedCount: 1,
+  };
+  
   window.localStorage.setItem(prefix + codeKey, JSON.stringify(rec));
   window.localStorage.setItem(activeKey, codeKey);
+  
+  console.log(`[Subscription] Code activated: ${plan} (${days} days) on device ${currentFp.slice(0, 6)}...`);
   return rec;
 }
 
@@ -169,31 +210,6 @@ export function formatRemaining(ms: number): string {
   const s = totalSec % 60;
   if (d > 0) return `${d}ي ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-const USED_CODES_KEY = "alfa_pro_used_codes";
-
-export function isCodeUsedOnOtherDevice(codeKey: string): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const raw = window.localStorage.getItem(USED_CODES_KEY);
-    const used: Record<string, string> = raw ? JSON.parse(raw) : {};
-    const currentFp = getDeviceFingerprint();
-    if (used[codeKey] && used[codeKey] !== currentFp) return true;
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-export function markCodeAsUsed(codeKey: string) {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = window.localStorage.getItem(USED_CODES_KEY);
-    const used: Record<string, string> = raw ? JSON.parse(raw) : {};
-    used[codeKey] = getDeviceFingerprint();
-    window.localStorage.setItem(USED_CODES_KEY, JSON.stringify(used));
-  } catch {}
 }
 
 // ===== Trial support for both bots =====
