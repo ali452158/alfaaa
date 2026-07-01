@@ -1,8 +1,6 @@
 // ===== MT5 connection via MetaApi SDK (optimized for memory) =====
 // Uses SDK with lazy loading + aggressive caching to prevent memory issues
 
-import https from "https";
-
 export interface RealTick {
   symbol: string;
   bid: number;
@@ -67,14 +65,22 @@ function readCreds() {
 }
 
 // Bypass SSL for self-signed certs
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+if (typeof process !== 'undefined') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
 
 async function loadMetaApi(token: string) {
   if (metaApiInstance) return metaApiInstance;
-  const mod: any = await import("metaapi.cloud-sdk/esm-node");
-  const MetaApi = mod.default || mod.MetaApi || mod;
-  metaApiInstance = new MetaApi(token, { application: "ALFA PRO" });
-  return metaApiInstance;
+  try {
+    const mod: any = await import("metaapi.cloud-sdk/esm-node");
+    const MetaApi = mod.default || mod.MetaApi || mod;
+    metaApiInstance = new MetaApi(token, { application: "ALFA PRO" });
+    console.log("[MT5] ✅ MetaAPI SDK loaded successfully");
+    return metaApiInstance;
+  } catch (e: any) {
+    console.error("[MT5] ❌ Failed to load SDK:", e.message);
+    throw e;
+  }
 }
 
 export function getStatus() {
@@ -97,9 +103,11 @@ export function autoConnect(): Promise<void> {
 async function doAutoConnect(): Promise<void> {
   if (state.status === "connected") return;
   const { token, login, password, server, accountId } = readCreds();
+  
   if (!token || !login || !password) {
     state.status = "disconnected";
     state.error = "missing-env";
+    console.log("[MT5] ❌ Missing credentials (token, login, or password)");
     return;
   }
 
@@ -109,28 +117,38 @@ async function doAutoConnect(): Promise<void> {
   state.server = server;
 
   try {
+    console.log(`[MT5] 🔄 Connecting to ${server} with login ${login}...`);
     const metaApi = await loadMetaApi(token);
 
     // Get account
     let account = null;
     if (accountId && accountId.length > 10) {
       try {
+        console.log(`[MT5] 🔍 Looking for account ${accountId}...`);
         account = await metaApi.metatraderAccountApi.getAccount(accountId);
         console.log(`[MT5] ✅ Found account: ${account.id}`);
       } catch (e: any) {
-        console.log(`[MT5] ⚠️ getAccount failed: ${String(e?.message || e).slice(0, 80)}`);
+        const errMsg = String(e?.message || e).slice(0, 80);
+        console.log(`[MT5] ⚠️ getAccount failed: ${errMsg}`);
       }
     }
 
     if (!account) {
       try {
+        console.log(`[MT5] 🔍 Searching for account with login ${login}...`);
         const accounts = await metaApi.metatraderAccountApi.getAccountsWithInfiniteScrollPagination({ login });
+        console.log(`[MT5] 📊 Found ${accounts.length} accounts`);
         account = accounts.find((a: any) => String(a.login) === String(login) && a.server === server);
-      } catch {}
+        if (account) {
+          console.log(`[MT5] ✅ Matched account: ${account.id}`);
+        }
+      } catch (e: any) {
+        console.log(`[MT5] ⚠️ Account search failed: ${String(e?.message || e).slice(0, 80)}`);
+      }
     }
 
     if (!account) {
-      throw new Error(`لم يتم العثور على حساب MT5 (login=${login})`);
+      throw new Error(`لم يتم العثور على حساب MT5 (login=${login}, server=${server})`);
     }
 
     state.accountId = account.id;
@@ -138,17 +156,23 @@ async function doAutoConnect(): Promise<void> {
     connectionInstance = rpcConnection;
 
     // Connect with timeout
+    console.log("[MT5] 🔗 Establishing RPC connection...");
     await Promise.race([
       rpcConnection.connect(),
       new Promise((_, reject) => setTimeout(() => reject(new Error("connect timeout")), 15000)),
-    ]).catch(() => {});
+    ]).catch((e) => {
+      console.log(`[MT5] ⚠️ Connect error (non-fatal): ${e.message}`);
+    });
 
     // Wait for connection (try multiple methods)
     if (typeof rpcConnection.waitConnected === "function") {
+      console.log("[MT5] ⏳ Waiting for connection...");
       await Promise.race([
         rpcConnection.waitConnected(),
         new Promise((_, reject) => setTimeout(() => reject(new Error("waitConnected timeout")), 10000)),
-      ]).catch(() => {});
+      ]).catch((e) => {
+        console.log(`[MT5] ⚠️ Wait error (non-fatal): ${e.message}`);
+      });
     } else {
       // Fallback: just wait a bit
       await new Promise((r) => setTimeout(r, 3000));
@@ -158,7 +182,7 @@ async function doAutoConnect(): Promise<void> {
     state.status = "connected";
     state.connectedAt = Date.now();
     state.error = null;
-    console.log(`[MT5] ✅ Connected! Login: ${login} | Server: ${server}`);
+    console.log(`[MT5] ✅ Connected! Login: ${login} | Server: ${server} | Account: ${account.id}`);
 
     // Initial tick fetch
     refreshAllTicks().catch(() => {});
@@ -187,7 +211,9 @@ async function refreshAllTicks() {
         tickCache.set(sym, { bid, ask, time: Date.now() });
         successCount++;
       }
-    } catch {}
+    } catch {
+      // Silent fail for individual symbols
+    }
   }
 
   lastTickRefresh = Date.now();
@@ -225,3 +251,4 @@ export async function fetchCandles(
 ): Promise<Candle[]> {
   return [];
 }
+
