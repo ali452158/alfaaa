@@ -1,0 +1,16 @@
+# Nixpacks config for Railway — uses start.sh to run all services
+[phases.setup]
+nixPkgs = ["nodejs_20", "bash", "openssl"]
+
+[phases.install]
+cmds = ["npm install --legacy-peer-deps"]
+
+[phases.build]
+cmds = ["npx prisma generate", "npm run build"]
+
+[start]
+cmd = "bash start.sh"
+
+[variables]
+NODE_ENV = "production"
+NIXPACKS_NODE_VERSION = "20"
