@@ -25,8 +25,6 @@ import {
   clearActivation,
   timeLeftMs,
   formatRemaining,
-  isCodeUsedOnOtherDevice,
-  markCodeAsUsed,
   trialRemaining,
   type BotType,
 } from "@/lib/subscription";
@@ -120,17 +118,14 @@ export function DualGate({ children }: Props) {
         return;
       }
 
-      const codeKey = `${result.bot}-${result.plan}-${result.uniqueId}`;
-      if (isCodeUsedOnOtherDevice(codeKey)) {
-        setMsg({ ok: false, text: "⚠️ هذا الكود مُستخدم على جهاز آخر. كل كود يعمل على جهاز واحد فقط." });
+      // Activate for the correct bot — returns null if code already used
+      const botName = result.bot === "iq_option" ? "IQ Option" : "ALFA PRO";
+      const rec = activate(result.bot, result.plan, result.days, result.uniqueId);
+      if (!rec) {
+        setMsg({ ok: false, text: "⚠️ هذا الكود مُستخدم بالفعل على جهاز آخر أو تم استخدامه من قبل." });
         setBusy(false);
         return;
       }
-
-      // Activate for the correct bot
-      const botName = result.bot === "iq_option" ? "IQ Option" : "ALFA PRO";
-      activate(result.bot, result.plan, result.days, result.uniqueId);
-      markCodeAsUsed(codeKey);
       const def = PLANS.find((p) => p.type === result.plan);
 
       setMsg({
