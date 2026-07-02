@@ -51,7 +51,7 @@ export function validateCode(code: string): {
 } | null {
   const clean = code.trim().toUpperCase();
   // Match: ALFA-X##-####-#### OR IQ-X##-####-####
-  const match = clean.match(/^(ALFA|IQ)-([A-Z])(\\d+)-([A-Z0-9]{3,8})-([A-F0-9]{4})$/);
+  const match = clean.match(/^(ALFA|IQ)-([A-Z])(\d+)-([A-Z0-9]{3,8})-([A-F0-9]{4})$/);
   if (!match) return null;
   const [, botPrefix, planCode, daysStr, id, checksum] = match;
   const def = PLANS.find((p) => p.code === planCode);
