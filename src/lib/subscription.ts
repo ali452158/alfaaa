@@ -86,6 +86,10 @@ const IQ_ACTIVATION_PREFIX = "iq_option_code_";
 const IQ_ACTIVE_CODE_KEY = "iq_option_active_code";
 const IQ_TRIAL_KEY = "iq_option_trial_start";
 
+// Track which codes have been used (globally, across all devices)
+const USED_CODES_KEY = "alfa_pro_used_codes";
+const IQ_USED_CODES_KEY = "iq_option_used_codes";
+
 interface ActivationRecord {
   plan: PlanType;
   uniqueId: string;
@@ -105,6 +109,37 @@ function computeExpiry(days: number, fromTime: number): number {
   // End of the target day (23:59:59.999)
   const endOfTargetDay = startOfToday + days * 24 * 60 * 60 * 1000 + (24 * 60 * 60 * 1000 - 1);
   return endOfTargetDay;
+}
+
+// Check if a code has been used globally (on ANY device)
+function isCodeUsedGlobally(bot: BotType, uniqueId: string): boolean {
+  if (typeof window === "undefined") return false;
+  const usedCodesKey = bot === "iq_option" ? IQ_USED_CODES_KEY : USED_CODES_KEY;
+  try {
+    const usedCodesStr = window.localStorage.getItem(usedCodesKey);
+    if (!usedCodesStr) return false;
+    const usedCodes = JSON.parse(usedCodesStr) as string[];
+    return usedCodes.includes(uniqueId);
+  } catch (e) {
+    console.error("[Subscription] Error checking used codes:", e);
+    return false;
+  }
+}
+
+// Mark a code as used globally
+function markCodeAsUsedGlobally(bot: BotType, uniqueId: string): void {
+  if (typeof window === "undefined") return;
+  const usedCodesKey = bot === "iq_option" ? IQ_USED_CODES_KEY : USED_CODES_KEY;
+  try {
+    const usedCodesStr = window.localStorage.getItem(usedCodesKey);
+    const usedCodes = usedCodesStr ? JSON.parse(usedCodesStr) : [];
+    if (!usedCodes.includes(uniqueId)) {
+      usedCodes.push(uniqueId);
+      window.localStorage.setItem(usedCodesKey, JSON.stringify(usedCodes));
+    }
+  } catch (e) {
+    console.error("[Subscription] Error marking code as used:", e);
+  }
 }
 
 export function getActivation(bot: BotType = "alfa_pro"): ActivationRecord | null {
@@ -151,7 +186,13 @@ export function activate(bot: BotType, plan: PlanType, days: number, uniqueId: s
   const codeKey = `${plan}-${uniqueId}`;
   const currentFp = getDeviceFingerprint();
   
-  // ✅ CHECK: Is this code already used on THIS device?
+  // ✅ CHECK 1: Has this code been used on ANY device?
+  if (isCodeUsedGlobally(bot, uniqueId)) {
+    console.warn("[Subscription] Code already used on another device");
+    return null;
+  }
+  
+  // ✅ CHECK 2: Is this code already used on THIS device?
   const existingRaw = window.localStorage.getItem(prefix + codeKey);
   if (existingRaw) {
     try {
@@ -162,10 +203,6 @@ export function activate(bot: BotType, plan: PlanType, days: number, uniqueId: s
         console.warn("[Subscription] Code already used on this device");
         return null; // Code already activated on this device
       }
-      
-      // Different device — code is locked to another device
-      console.warn("[Subscription] Code is locked to another device");
-      return null;
     } catch (e) {
       console.error("[Subscription] Error parsing existing activation:", e);
     }
@@ -184,6 +221,9 @@ export function activate(bot: BotType, plan: PlanType, days: number, uniqueId: s
   
   window.localStorage.setItem(prefix + codeKey, JSON.stringify(rec));
   window.localStorage.setItem(activeKey, codeKey);
+  
+  // Mark code as used globally
+  markCodeAsUsedGlobally(bot, uniqueId);
   
   console.log(`[Subscription] Code activated: ${plan} (${days} days) on device ${currentFp.slice(0, 6)}...`);
   return rec;
